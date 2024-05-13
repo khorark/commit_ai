@@ -1,11 +1,14 @@
+#! /usr/bin/env node
+
 import simpleGit, { SimpleGit } from "simple-git";
 import { promises } from "node:fs";
 import { Llama3Response } from "./types";
 import commander from "commander";
 import { version } from "../package.json";
+import path from "node:path";
 
+const appDir = path.join(__dirname, "..");
 const program = new commander.Command();
-
 const git: SimpleGit = simpleGit();
 
 async function getAiText(prompt: string, diff: string): Promise<string | null> {
@@ -59,15 +62,9 @@ async function main() {
       }
 
       const [promptLabel, promptTitle, promptSum] = await Promise.all([
-        promises.readFile(
-          __dirname + "/prompt/conventional_commit.tmpl",
-          "utf-8",
-        ),
-        promises.readFile(__dirname + "/prompt/summarize_title.tmpl", "utf-8"),
-        promises.readFile(
-          __dirname + "/prompt/summarize_file_diff.tmpl",
-          "utf-8",
-        ),
+        promises.readFile(appDir + "/prompt/conventional_commit.tmpl", "utf-8"),
+        promises.readFile(appDir + "/prompt/summarize_title.tmpl", "utf-8"),
+        promises.readFile(appDir + "/prompt/summarize_file_diff.tmpl", "utf-8"),
       ]);
 
       const [label, title, summary] = await Promise.all([
