@@ -1,7 +1,10 @@
-import simpleGit, { SimpleGit, SimpleGitOptions } from "simple-git";
+import simpleGit, { SimpleGit } from "simple-git";
 import { promises } from "node:fs";
-import path from "node:path";
 import { Llama3Response } from "./types";
+import commander from "commander";
+import { version } from "../package.json";
+
+const program = new commander.Command();
 
 const git: SimpleGit = simpleGit();
 
@@ -29,47 +32,68 @@ async function getAiText(prompt: string, diff: string): Promise<string | null> {
 }
 
 async function main() {
-  const [promptLabel, promptTitle, promptSum] = await Promise.all([
-    promises.readFile(__dirname + "/prompt/conventional_commit.tmpl", "utf-8"),
-    promises.readFile(__dirname + "/prompt/summarize_title.tmpl", "utf-8"),
-    promises.readFile(__dirname + "/prompt/summarize_file_diff.tmpl", "utf-8"),
-  ]);
+  program.name("Commit AI").description("AI Commit Generator").version(version);
 
-  // const promptLabel = readFileSync(
-  //   __dirname + "/prompt/conventional_commit.tmpl",
-  //   "utf-8",
-  // );
-  // const promptTitle = readFileSync(
-  //   __dirname + "/prompt/summarize_title.tmpl",
-  //   "utf-8",
-  // );
-  // const promptSum = readFileSync(
-  //   __dirname + "/prompt/summarize_file_diff.tmpl",
-  //   "utf-8",
-  // );
-  const diff = await git.diff(["--"]);
-  console.log("diff:", diff);
-  return;
-  // const status = await git.status(['--']);
-  // console.log('status', status)
+  program
+    .command("commit", { isDefault: true })
+    .description("Commit AI message")
+    .option("-p, --preview", "show preview commit message")
+    .option(
+      "-a, --amend",
+      "replace the tip of the current branch by creating a new commit",
+    )
+    .action(async (options) => {
+      let diff: string | null = null;
 
-  const [label, title, summary] = await Promise.all([
-    getAiText(promptLabel, diff),
-    getAiText(promptTitle, diff),
-    getAiText(promptSum, diff),
-  ]);
+      if (options.amend) {
+        diff = await git.diff(["HEAD^", "HEAD"]);
+      } else {
+        diff = await git.diff(["--staged"]);
+      }
 
-  // const label = await getAiText(promptLabel, diff);
-  // const title = await getAiText(promptTitle, diff);
-  // const summary = await getAiText(promptSum, diff);
+      if (!diff) {
+        console.log(
+          "Error: please add your staged changes using git add <files...>",
+        );
+        process.exit(1);
+      }
 
-  const finalText = `
-  ${label}: ${title}
+      const [promptLabel, promptTitle, promptSum] = await Promise.all([
+        promises.readFile(
+          __dirname + "/prompt/conventional_commit.tmpl",
+          "utf-8",
+        ),
+        promises.readFile(__dirname + "/prompt/summarize_title.tmpl", "utf-8"),
+        promises.readFile(
+          __dirname + "/prompt/summarize_file_diff.tmpl",
+          "utf-8",
+        ),
+      ]);
 
-  ${summary}
-  `;
+      const [label, title, summary] = await Promise.all([
+        getAiText(promptLabel, diff),
+        getAiText(promptTitle, diff),
+        getAiText(promptSum, diff),
+      ]);
 
-  console.log("commit => ", finalText);
+      const finalMessageText = `
+      ${label}: ${title}
+
+      ${summary}
+      `;
+
+      console.log(finalMessageText);
+
+      if (options.amend) {
+        await git.commit(finalMessageText, undefined, { "--amend": null });
+      } else {
+        if (!options.preview) {
+          await git.commit(finalMessageText);
+        }
+      }
+    });
+
+  program.parse(process.argv);
 }
 
 main();
