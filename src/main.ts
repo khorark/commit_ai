@@ -1,6 +1,6 @@
 #! /usr/bin/env node
 
-import simpleGit, { SimpleGit } from "simple-git";
+import simpleGit, { GitError, SimpleGit } from "simple-git";
 import { promises } from "node:fs";
 import { Llama3Response } from "./types";
 import commander from "commander";
@@ -35,62 +35,71 @@ async function getAiText(prompt: string, diff: string): Promise<string | null> {
 }
 
 async function main() {
-  program.name("Commit AI").description("AI Commit Generator").version(version);
+  try {
+    await git.status(["--"]);
+  } catch (_e) {
+    const e = _e as GitError;
+    console.log(`${e.name}: ${e.message}`);
+    process.exit(1);
+  }
 
   program
-    .command("commit", { isDefault: true })
-    .description("Commit AI message")
+    .name("Commit AI")
+    .description("AI Commit Generator")
+    .version(version)
     .option("-p, --preview", "show preview commit message")
     .option(
       "-a, --amend",
       "replace the tip of the current branch by creating a new commit",
-    )
-    .action(async (options) => {
-      let diff: string | null = null;
-
-      if (options.amend) {
-        diff = await git.diff(["HEAD^", "HEAD"]);
-      } else {
-        diff = await git.diff(["--staged"]);
-      }
-
-      if (!diff) {
-        console.log(
-          "Error: please add your staged changes using git add <files...>",
-        );
-        process.exit(1);
-      }
-
-      const [promptLabel, promptTitle, promptSum] = await Promise.all([
-        promises.readFile(appDir + "/prompt/conventional_commit.tmpl", "utf-8"),
-        promises.readFile(appDir + "/prompt/summarize_title.tmpl", "utf-8"),
-        promises.readFile(appDir + "/prompt/summarize_file_diff.tmpl", "utf-8"),
-      ]);
-
-      const [label, title, summary] = await Promise.all([
-        getAiText(promptLabel, diff),
-        getAiText(promptTitle, diff),
-        getAiText(promptSum, diff),
-      ]);
-
-      const finalMessageText = `
-      ${label}: ${title}
-
-      ${summary}
-      `;
-
-      console.log(finalMessageText);
-
-      if (options.amend) {
-        await git.commit(finalMessageText, undefined, { "--amend": null });
-      } else {
-        if (!options.preview) {
-          await git.commit(finalMessageText);
-        }
-      }
-    });
-
+    );
   program.parse(process.argv);
+
+  const options = program.opts();
+  const preview = Boolean(options.preview);
+  const amend = Boolean(options.amend);
+
+  let diff: string | null = null;
+
+  if (amend) {
+    diff = await git.diff(["HEAD^", "HEAD"]);
+  } else {
+    diff = await git.diff(["--staged"]);
+  }
+
+  if (!diff) {
+    console.log(
+      "Error: please add your staged changes using git add <files...>",
+    );
+    process.exit(1);
+  }
+
+  const [promptLabel, promptTitle, promptSum] = await Promise.all([
+    promises.readFile(appDir + "/prompt/conventional_commit.tmpl", "utf-8"),
+    promises.readFile(appDir + "/prompt/summarize_title.tmpl", "utf-8"),
+    promises.readFile(appDir + "/prompt/summarize_file_diff.tmpl", "utf-8"),
+  ]);
+
+  const [label, title, summary] = await Promise.all([
+    getAiText(promptLabel, diff),
+    getAiText(promptTitle, diff),
+    getAiText(promptSum, diff),
+  ]);
+
+  const finalMessageText = `
+  ${label}: ${title}
+
+  ${summary}
+  `;
+
+  console.log(finalMessageText);
+
+  if (amend) {
+    await git.commit(finalMessageText, undefined, { "--amend": null });
+  } else {
+    if (!preview) {
+      await git.commit(finalMessageText);
+    }
+  }
 }
 
 main();
